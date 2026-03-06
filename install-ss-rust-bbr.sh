@@ -12,7 +12,8 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 gen_password() {
-  tr -dc 'A-Za-z0-9!@#$%^&*()_+{}[]:;,.?~-' </dev/urandom | head -c 32
+  # avoid pipefail SIGPIPE issue from tr|head
+  openssl rand -base64 36 | tr -d '\n' | cut -c1-32
 }
 
 SS_PASSWORD="$(gen_password)"
