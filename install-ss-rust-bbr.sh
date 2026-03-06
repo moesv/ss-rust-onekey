@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # ===== 可改参数 =====
-SS_PORT="${SS_PORT:-8388}"
+# 端口：默认自动随机 5 位（10000-65535），也可手动传 SS_PORT 覆盖
+SS_PORT="${SS_PORT:-$((10000 + RANDOM % 55536))}"
 SS_METHOD="${SS_METHOD:-aes-128-gcm}"
 # ===================
 
