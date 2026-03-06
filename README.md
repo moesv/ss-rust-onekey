@@ -17,8 +17,8 @@
 ## 使用
 
 ```bash
-chmod +x install-ss-rust-bbr.sh
-./install-ss-rust-bbr.sh
+chmod +x ssrust.sh
+./ssrust.sh
 ```
 
 ## 可选环境变量
@@ -29,7 +29,7 @@ chmod +x install-ss-rust-bbr.sh
 示例：
 
 ```bash
-SS_PORT=443 SS_METHOD=aes-128-gcm ./install-ss-rust-bbr.sh
+SS_PORT=443 SS_METHOD=aes-128-gcm ./ssrust.sh
 ```
 
 ## 安装后检查
