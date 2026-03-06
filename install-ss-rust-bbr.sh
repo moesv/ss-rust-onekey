@@ -49,7 +49,7 @@ SS_PASSWORD="$(gen_password)"
 
 echo "[1/7] 安装依赖..."
 apt update -y
-apt install -y curl wget tar jq ca-certificates ufw
+apt install -y curl wget tar xz-utils jq ca-certificates ufw
 
 ARCH="$(uname -m)"
 case "$ARCH" in
