@@ -106,7 +106,11 @@ systemctl daemon-reload
 systemctl enable --now shadowsocks-rust
 
 echo "[5/7] 写入 sysctl（含 BBR）..."
-cat > /etc/sysctl.conf <<'EOF'
+CURRENT_CC="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
+if [[ "$CURRENT_CC" == "bbr" ]]; then
+  echo "检测到系统已启用 BBR，跳过重复写入 /etc/sysctl.conf"
+else
+  cat > /etc/sysctl.conf <<'EOF'
 fs.file-max = 6815744
 net.ipv4.tcp_max_syn_backlog = 8192
 net.core.somaxconn = 8192
@@ -141,7 +145,8 @@ net.ipv6.conf.default.forwarding = 1
 net.ipv4.conf.all.route_localnet = 1
 EOF
 
-sysctl -p
+  sysctl -p
+fi
 
 echo "[6/7] 放行防火墙..."
 ufw allow "${SS_PORT}/tcp" || true
