@@ -7,10 +7,12 @@
 - 自动安装 shadowsocks-rust（最新 release）
 - 默认协议：`aes-128-gcm`
 - 密码自动随机生成（32 位）
+- 默认随机 5 位端口（避开已占用端口）
 - 自动写入并启用 `systemd` 服务
-- 自动写入 `sysctl`（含 BBR 参数）并 `sysctl -p`
+- 自动写入 `sysctl`（含 BBR 参数）
+- 若系统已启用 BBR，则跳过重复写入
 - 自动放行 TCP/UDP 端口（UFW）
-- 安装后输出连接信息并保存到 `/root/ss-rust-info.txt`
+- 安装后输出连接信息 + `ss://` 链接并保存到 `/root/ss-rust-info.txt`
 
 ## 使用
 

@@ -47,9 +47,9 @@ gen_password() {
 
 SS_PASSWORD="$(gen_password)"
 
-echo "[1/7] 安装依赖..."
+echo "[1/8] 安装依赖..."
 apt update -y
-apt install -y curl wget tar xz-utils jq ca-certificates ufw
+apt install -y curl wget tar xz-utils jq ca-certificates ufw openssl
 
 ARCH="$(uname -m)"
 case "$ARCH" in
@@ -61,19 +61,22 @@ case "$ARCH" in
     ;;
 esac
 
-echo "[2/7] 下载 shadowsocks-rust..."
-TAG="$(curl -fsSL https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases/latest | jq -r .tag_name)"
+echo "[2/8] 下载 shadowsocks-rust..."
+TAG="$(curl -fsSL --retry 3 --retry-delay 2 https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases/latest | jq -r .tag_name)"
 PKG="shadowsocks-v${TAG#v}.${SS_ARCH}.tar.xz"
 URL="https://github.com/shadowsocks/shadowsocks-rust/releases/download/${TAG}/${PKG}"
 
 mkdir -p /opt/ss-rust
 cd /opt/ss-rust
-wget -qO ss.tar.xz "$URL"
+wget -q --tries=3 -O ss.tar.xz "$URL"
 tar -xf ss.tar.xz
 install -m 755 ssserver /usr/local/bin/ssserver
 
-echo "[3/7] 写入 ss 配置..."
+echo "[3/8] 写入 ss 配置（备份旧配置）..."
 mkdir -p /etc/shadowsocks-rust
+if [[ -f /etc/shadowsocks-rust/config.json ]]; then
+  cp -a /etc/shadowsocks-rust/config.json "/etc/shadowsocks-rust/config.json.bak.$(date +%Y%m%d-%H%M%S)"
+fi
 cat > /etc/shadowsocks-rust/config.json <<EOF
 {
   "server": "0.0.0.0",
@@ -85,7 +88,7 @@ cat > /etc/shadowsocks-rust/config.json <<EOF
 EOF
 chmod 600 /etc/shadowsocks-rust/config.json
 
-echo "[4/7] 创建 systemd 服务..."
+echo "[4/8] 创建/更新 systemd 服务..."
 cat > /etc/systemd/system/shadowsocks-rust.service <<'EOF'
 [Unit]
 Description=Shadowsocks Rust Server
@@ -105,7 +108,7 @@ EOF
 systemctl daemon-reload
 systemctl enable --now shadowsocks-rust
 
-echo "[5/7] 写入 sysctl（含 BBR）..."
+echo "[5/8] 写入 sysctl（含 BBR）..."
 CURRENT_CC="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
 if [[ "$CURRENT_CC" == "bbr" ]]; then
   echo "检测到系统已启用 BBR，跳过重复写入 /etc/sysctl.conf"
@@ -144,22 +147,34 @@ net.ipv6.conf.all.forwarding = 1
 net.ipv6.conf.default.forwarding = 1
 net.ipv4.conf.all.route_localnet = 1
 EOF
-
   sysctl -p
 fi
 
-echo "[6/7] 放行防火墙..."
+echo "[6/8] 放行防火墙..."
 ufw allow "${SS_PORT}/tcp" || true
 ufw allow "${SS_PORT}/udp" || true
 
-echo "[7/7] 输出连接信息..."
-SERVER_IP="$(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
+echo "[7/8] 服务健康检查..."
+if ! systemctl is-active --quiet shadowsocks-rust; then
+  echo "服务启动失败，请查看日志：journalctl -u shadowsocks-rust -n 100 --no-pager"
+  exit 1
+fi
+
+echo "[8/8] 输出连接信息..."
+SERVER_IP="$(curl -4 -s ifconfig.me || hostname -I | awk '{print $1}')"
+if [[ -z "${SERVER_IP}" ]]; then
+  SERVER_IP="$(curl -6 -s ifconfig.me || true)"
+fi
+
+SS_BASE64="$(printf '%s' "${SS_METHOD}:${SS_PASSWORD}@${SERVER_IP}:${SS_PORT}" | base64 -w0)"
+SS_URL="ss://${SS_BASE64}"
 
 cat > /root/ss-rust-info.txt <<EOF
 server=${SERVER_IP}
 port=${SS_PORT}
 method=${SS_METHOD}
 password=${SS_PASSWORD}
+ss_url=${SS_URL}
 EOF
 chmod 600 /root/ss-rust-info.txt
 
@@ -169,7 +184,9 @@ echo "server:   ${SERVER_IP}"
 echo "port:     ${SS_PORT}"
 echo "method:   ${SS_METHOD}"
 echo "password: ${SS_PASSWORD}"
+echo "ss_url:   ${SS_URL}"
 echo "info:     /root/ss-rust-info.txt"
 echo
 echo "BBR 检查：sysctl net.ipv4.tcp_congestion_control"
 echo "服务检查：systemctl status shadowsocks-rust --no-pager"
+echo "日志查看：journalctl -u shadowsocks-rust -f"
