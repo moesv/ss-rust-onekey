@@ -2,14 +2,42 @@
 set -euo pipefail
 
 # ===== 可改参数 =====
-# 端口：默认自动随机 5 位（10000-65535），也可手动传 SS_PORT 覆盖
-SS_PORT="${SS_PORT:-$((10000 + RANDOM % 55536))}"
+# 端口：默认自动随机 5 位（10000-65535），且避开已占用端口
+# 也可手动传 SS_PORT 覆盖（若被占用会报错退出）
+SS_PORT="${SS_PORT:-}"
 SS_METHOD="${SS_METHOD:-aes-128-gcm}"
 # ===================
 
 if [[ $EUID -ne 0 ]]; then
   echo "请用 root 运行"
   exit 1
+fi
+
+port_in_use() {
+  local p="$1"
+  ss -lntu 2>/dev/null | awk '{print $5}' | grep -Eq "(^|:)$p$"
+}
+
+pick_free_port() {
+  local p tries=0
+  while (( tries < 200 )); do
+    p=$((10000 + RANDOM % 55536))
+    if ! port_in_use "$p"; then
+      echo "$p"
+      return 0
+    fi
+    tries=$((tries + 1))
+  done
+  return 1
+}
+
+if [[ -n "$SS_PORT" ]]; then
+  if port_in_use "$SS_PORT"; then
+    echo "端口已被占用: $SS_PORT，请换一个端口"
+    exit 1
+  fi
+else
+  SS_PORT="$(pick_free_port)" || { echo "未找到可用 5 位端口"; exit 1; }
 fi
 
 gen_password() {

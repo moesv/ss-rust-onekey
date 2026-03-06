@@ -21,7 +21,7 @@ chmod +x install-ss-rust-bbr.sh
 
 ## 可选环境变量
 
-- `SS_PORT`（默认 `8388`）
+- `SS_PORT`（默认自动随机 5 位端口，且避开已占用端口）
 - `SS_METHOD`（默认 `aes-128-gcm`）
 
 示例：
