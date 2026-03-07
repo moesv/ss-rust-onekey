@@ -49,3 +49,20 @@ systemctl daemon-reload
 rm -f /usr/local/bin/ssserver
 rm -rf /etc/shadowsocks-rust /opt/ss-rust
 ```
+
+
+## 新增操作选项
+
+```bash
+# 安装/重装（默认）
+bash ssrust.sh
+
+# 改端口（自动随机5位端口）
+bash ssrust.sh change-port
+
+# 改为指定端口
+SS_PORT=23456 bash ssrust.sh change-port
+
+# 删除配置并停服务
+bash ssrust.sh delete-config
+```

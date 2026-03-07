@@ -2,11 +2,14 @@
 set -euo pipefail
 
 # ===== 可改参数 =====
-# 端口：默认自动随机 5 位（10000-65535），且避开已占用端口
-# 也可手动传 SS_PORT 覆盖（若被占用会报错退出）
+# 默认自动随机 5 位端口（10000-65535），也可手动传 SS_PORT
 SS_PORT="${SS_PORT:-}"
 SS_METHOD="${SS_METHOD:-aes-128-gcm}"
 # ===================
+
+CONFIG_PATH="/etc/shadowsocks-rust/config.json"
+SERVICE_PATH="/etc/systemd/system/shadowsocks-rust.service"
+INFO_PATH="/root/ss-rust-info.txt"
 
 if [[ $EUID -ne 0 ]]; then
   echo "请用 root 运行"
@@ -31,65 +34,109 @@ pick_free_port() {
   return 1
 }
 
-if [[ -n "$SS_PORT" ]]; then
-  if port_in_use "$SS_PORT"; then
-    echo "端口已被占用: $SS_PORT，请换一个端口"
-    exit 1
+resolve_port() {
+  if [[ -n "$SS_PORT" ]]; then
+    if port_in_use "$SS_PORT"; then
+      echo "端口已被占用: $SS_PORT，请换一个端口"
+      exit 1
+    fi
+  else
+    SS_PORT="$(pick_free_port)" || { echo "未找到可用 5 位端口"; exit 1; }
   fi
-else
-  SS_PORT="$(pick_free_port)" || { echo "未找到可用 5 位端口"; exit 1; }
-fi
+}
 
 gen_password() {
-  # avoid pipefail SIGPIPE issue from tr|head
   openssl rand -base64 36 | tr -d '\n' | cut -c1-32
 }
 
-SS_PASSWORD="$(gen_password)"
+get_server_ip() {
+  local ip
+  ip="$(curl -4 -s ifconfig.me || true)"
+  if [[ -z "$ip" ]]; then
+    ip="$(hostname -I | awk '{print $1}' || true)"
+  fi
+  if [[ -z "$ip" ]]; then
+    ip="$(curl -6 -s ifconfig.me || true)"
+  fi
+  echo "$ip"
+}
 
-echo "[1/8] 安装依赖..."
-apt update -y
-apt install -y curl wget tar xz-utils jq ca-certificates ufw openssl
+write_info() {
+  local server_ip="$1" method="$2" password="$3" port="$4"
+  local ss_base64 ss_url
+  ss_base64="$(printf '%s' "${method}:${password}@${server_ip}:${port}" | base64 -w0)"
+  ss_url="ss://${ss_base64}"
 
-ARCH="$(uname -m)"
-case "$ARCH" in
-  x86_64) SS_ARCH="x86_64-unknown-linux-gnu" ;;
-  aarch64|arm64) SS_ARCH="aarch64-unknown-linux-gnu" ;;
-  *)
-    echo "不支持架构: $ARCH"
-    exit 1
-    ;;
-esac
+  cat > "$INFO_PATH" <<EOF
+server=${server_ip}
+port=${port}
+method=${method}
+password=${password}
+ss_url=${ss_url}
+EOF
+  chmod 600 "$INFO_PATH"
 
-echo "[2/8] 下载 shadowsocks-rust..."
-TAG="$(curl -fsSL --retry 3 --retry-delay 2 https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases/latest | jq -r .tag_name)"
-PKG="shadowsocks-v${TAG#v}.${SS_ARCH}.tar.xz"
-URL="https://github.com/shadowsocks/shadowsocks-rust/releases/download/${TAG}/${PKG}"
+  echo
+  echo "✅ 完成"
+  echo "server:   ${server_ip}"
+  echo "port:     ${port}"
+  echo "method:   ${method}"
+  echo "password: ${password}"
+  echo "ss_url:   ${ss_url}"
+  echo "info:     ${INFO_PATH}"
+  echo
+}
 
-mkdir -p /opt/ss-rust
-cd /opt/ss-rust
-wget -q --tries=3 -O ss.tar.xz "$URL"
-tar -xf ss.tar.xz
-install -m 755 ssserver /usr/local/bin/ssserver
+install_deps() {
+  echo "[1/8] 安装依赖..."
+  apt update -y
+  apt install -y curl wget tar xz-utils jq ca-certificates ufw openssl
+}
 
-echo "[3/8] 写入 ss 配置（备份旧配置）..."
-mkdir -p /etc/shadowsocks-rust
-if [[ -f /etc/shadowsocks-rust/config.json ]]; then
-  cp -a /etc/shadowsocks-rust/config.json "/etc/shadowsocks-rust/config.json.bak.$(date +%Y%m%d-%H%M%S)"
-fi
-cat > /etc/shadowsocks-rust/config.json <<EOF
+install_binary() {
+  echo "[2/8] 下载 shadowsocks-rust..."
+  local arch tag pkg url
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64) arch="x86_64-unknown-linux-gnu" ;;
+    aarch64|arm64) arch="aarch64-unknown-linux-gnu" ;;
+    *) echo "不支持架构: $arch"; exit 1 ;;
+  esac
+
+  tag="$(curl -fsSL --retry 3 --retry-delay 2 https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases/latest | jq -r .tag_name)"
+  pkg="shadowsocks-v${tag#v}.${arch}.tar.xz"
+  url="https://github.com/shadowsocks/shadowsocks-rust/releases/download/${tag}/${pkg}"
+
+  mkdir -p /opt/ss-rust
+  cd /opt/ss-rust
+  wget -q --tries=3 -O ss.tar.xz "$url"
+  tar -xf ss.tar.xz
+  install -m 755 ssserver /usr/local/bin/ssserver
+}
+
+write_config() {
+  local port="$1" method="$2" password="$3"
+  echo "[3/8] 写入 ss 配置（备份旧配置）..."
+  mkdir -p /etc/shadowsocks-rust
+  if [[ -f "$CONFIG_PATH" ]]; then
+    cp -a "$CONFIG_PATH" "${CONFIG_PATH}.bak.$(date +%Y%m%d-%H%M%S)"
+  fi
+
+  cat > "$CONFIG_PATH" <<EOF
 {
   "server": "0.0.0.0",
-  "server_port": ${SS_PORT},
-  "password": "${SS_PASSWORD}",
-  "method": "${SS_METHOD}",
+  "server_port": ${port},
+  "password": "${password}",
+  "method": "${method}",
   "mode": "tcp_and_udp"
 }
 EOF
-chmod 600 /etc/shadowsocks-rust/config.json
+  chmod 600 "$CONFIG_PATH"
+}
 
-echo "[4/8] 创建/更新 systemd 服务..."
-cat > /etc/systemd/system/shadowsocks-rust.service <<'EOF'
+write_service() {
+  echo "[4/8] 创建/更新 systemd 服务..."
+  cat > "$SERVICE_PATH" <<'EOF'
 [Unit]
 Description=Shadowsocks Rust Server
 After=network.target
@@ -105,15 +152,18 @@ LimitNOFILE=51200
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable --now shadowsocks-rust
+  systemctl daemon-reload
+  systemctl enable --now shadowsocks-rust
+}
 
-echo "[5/8] 写入 sysctl（含 BBR）..."
-CURRENT_CC="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
-if [[ "$CURRENT_CC" == "bbr" ]]; then
-  echo "检测到系统已启用 BBR，跳过重复写入 /etc/sysctl.conf"
-else
-  cat > /etc/sysctl.conf <<'EOF'
+ensure_bbr() {
+  echo "[5/8] 写入 sysctl（含 BBR）..."
+  local current_cc
+  current_cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
+  if [[ "$current_cc" == "bbr" ]]; then
+    echo "检测到系统已启用 BBR，跳过重复写入 /etc/sysctl.conf"
+  else
+    cat > /etc/sysctl.conf <<'EOF'
 fs.file-max = 6815744
 net.ipv4.tcp_max_syn_backlog = 8192
 net.core.somaxconn = 8192
@@ -147,46 +197,113 @@ net.ipv6.conf.all.forwarding = 1
 net.ipv6.conf.default.forwarding = 1
 net.ipv4.conf.all.route_localnet = 1
 EOF
-  sysctl -p
-fi
+    sysctl -p
+  fi
+}
 
-echo "[6/8] 放行防火墙..."
-ufw allow "${SS_PORT}/tcp" || true
-ufw allow "${SS_PORT}/udp" || true
+open_firewall() {
+  local port="$1"
+  echo "[6/8] 放行防火墙..."
+  ufw allow "${port}/tcp" || true
+  ufw allow "${port}/udp" || true
+}
 
-echo "[7/8] 服务健康检查..."
-if ! systemctl is-active --quiet shadowsocks-rust; then
-  echo "服务启动失败，请查看日志：journalctl -u shadowsocks-rust -n 100 --no-pager"
-  exit 1
-fi
+health_check() {
+  echo "[7/8] 服务健康检查..."
+  if ! systemctl is-active --quiet shadowsocks-rust; then
+    echo "服务启动失败，请查看日志：journalctl -u shadowsocks-rust -n 100 --no-pager"
+    exit 1
+  fi
+}
 
-echo "[8/8] 输出连接信息..."
-SERVER_IP="$(curl -4 -s ifconfig.me || hostname -I | awk '{print $1}')"
-if [[ -z "${SERVER_IP}" ]]; then
-  SERVER_IP="$(curl -6 -s ifconfig.me || true)"
-fi
+do_install() {
+  resolve_port
+  local password server_ip
+  password="$(gen_password)"
 
-SS_BASE64="$(printf '%s' "${SS_METHOD}:${SS_PASSWORD}@${SERVER_IP}:${SS_PORT}" | base64 -w0)"
-SS_URL="ss://${SS_BASE64}"
+  install_deps
+  install_binary
+  write_config "$SS_PORT" "$SS_METHOD" "$password"
+  write_service
+  ensure_bbr
+  open_firewall "$SS_PORT"
+  health_check
 
-cat > /root/ss-rust-info.txt <<EOF
-server=${SERVER_IP}
-port=${SS_PORT}
-method=${SS_METHOD}
-password=${SS_PASSWORD}
-ss_url=${SS_URL}
+  echo "[8/8] 输出连接信息..."
+  server_ip="$(get_server_ip)"
+  write_info "$server_ip" "$SS_METHOD" "$password" "$SS_PORT"
+
+  echo "BBR 检查：sysctl net.ipv4.tcp_congestion_control"
+  echo "服务检查：systemctl status shadowsocks-rust --no-pager"
+  echo "日志查看：journalctl -u shadowsocks-rust -f"
+}
+
+change_port() {
+  if [[ ! -f "$CONFIG_PATH" ]]; then
+    echo "未找到配置文件：$CONFIG_PATH，请先执行安装"
+    exit 1
+  fi
+
+  resolve_port
+  local old_port password method server_ip
+  old_port="$(jq -r '.server_port' "$CONFIG_PATH")"
+  password="$(jq -r '.password' "$CONFIG_PATH")"
+  method="$(jq -r '.method' "$CONFIG_PATH")"
+
+  cp -a "$CONFIG_PATH" "${CONFIG_PATH}.bak.$(date +%Y%m%d-%H%M%S)"
+  jq --argjson p "$SS_PORT" '.server_port=$p' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp"
+  mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
+  chmod 600 "$CONFIG_PATH"
+
+  # 放行新端口（旧端口规则不强删，避免误删）
+  open_firewall "$SS_PORT"
+
+  systemctl restart shadowsocks-rust
+  health_check
+
+  server_ip="$(get_server_ip)"
+  write_info "$server_ip" "$method" "$password" "$SS_PORT"
+  echo "端口已变更：${old_port} -> ${SS_PORT}"
+}
+
+delete_config() {
+  echo "将删除 Shadowsocks Rust 配置并停止服务，继续？[y/N]"
+  read -r ans
+  if [[ "${ans:-N}" != "y" && "${ans:-N}" != "Y" ]]; then
+    echo "已取消"
+    exit 0
+  fi
+
+  systemctl disable --now shadowsocks-rust 2>/dev/null || true
+  rm -f "$SERVICE_PATH"
+  systemctl daemon-reload
+
+  [[ -f "$CONFIG_PATH" ]] && rm -f "$CONFIG_PATH"
+  [[ -f "$INFO_PATH" ]] && rm -f "$INFO_PATH"
+
+  echo "✅ 已删除配置并停止服务"
+}
+
+usage() {
+  cat <<EOF
+用法:
+  bash ssrust.sh                # 安装/重装（默认）
+  bash ssrust.sh install        # 安装/重装
+  bash ssrust.sh change-port    # 改端口（随机5位）
+  SS_PORT=23456 bash ssrust.sh change-port   # 改为指定端口
+  bash ssrust.sh delete-config  # 删除配置并停服务
 EOF
-chmod 600 /root/ss-rust-info.txt
+}
 
-echo
-echo "✅ 完成"
-echo "server:   ${SERVER_IP}"
-echo "port:     ${SS_PORT}"
-echo "method:   ${SS_METHOD}"
-echo "password: ${SS_PASSWORD}"
-echo "ss_url:   ${SS_URL}"
-echo "info:     /root/ss-rust-info.txt"
-echo
-echo "BBR 检查：sysctl net.ipv4.tcp_congestion_control"
-echo "服务检查：systemctl status shadowsocks-rust --no-pager"
-echo "日志查看：journalctl -u shadowsocks-rust -f"
+ACTION="${1:-install}"
+case "$ACTION" in
+  install) do_install ;;
+  change-port) change_port ;;
+  delete-config) delete_config ;;
+  -h|--help|help) usage ;;
+  *)
+    echo "未知参数: $ACTION"
+    usage
+    exit 1
+    ;;
+esac
