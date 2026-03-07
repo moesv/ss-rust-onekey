@@ -236,7 +236,7 @@ do_install() {
   install_binary
   write_config "$SS_PORT" "$SS_METHOD" "$password"
   write_service
-  ensure_bbr
+  # BBR 改为交互菜单手动启用，不在安装流程自动执行
   open_firewall "$SS_PORT"
   health_check
 
@@ -244,9 +244,9 @@ do_install() {
   server_ip="$(get_server_ip)"
   write_info "$server_ip" "$SS_METHOD" "$password" "$SS_PORT"
 
-  echo "BBR 检查：sysctl net.ipv4.tcp_congestion_control"
   echo "服务检查：systemctl status shadowsocks-rust --no-pager"
   echo "日志查看：journalctl -u shadowsocks-rust -f"
+  echo "如需启用 BBR：进入菜单选 9"
 }
 
 change_port() {
