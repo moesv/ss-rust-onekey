@@ -157,7 +157,7 @@ EOF
 }
 
 ensure_bbr() {
-  echo "[5/8] 写入 sysctl（含 BBR）..."
+  echo "[BBR] 检查并启用..."
   local current_cc
   current_cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
   if [[ "$current_cc" == "bbr" ]]; then
@@ -198,7 +198,18 @@ net.ipv6.conf.default.forwarding = 1
 net.ipv4.conf.all.route_localnet = 1
 EOF
     sysctl -p
+    echo "已写入并应用 BBR 参数"
   fi
+}
+
+show_bbr_status() {
+  echo "当前拥塞控制: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)"
+  echo "当前队列调度: $(sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown)"
+}
+
+enable_bbr_only() {
+  ensure_bbr
+  show_bbr_status
 }
 
 open_firewall() {
@@ -376,10 +387,11 @@ interactive_menu() {
  6) 查看最近日志（100行）
  7) 连接链路自检
  8) 清除当前配置（危险）
+ 9) BBR 管理（查看/启用）
  0) 退出控制台
 ==================================================
 EOF
-    read -rp "输入编号 [0-8]: " n
+    read -rp "输入编号 [0-9]: " n
     case "$n" in
       1) do_install ;;
       2) config_manage_menu ;;
@@ -389,6 +401,17 @@ EOF
       6) show_logs ;;
       7) network_test ;;
       8) delete_config ;;
+      9)
+        echo "\nBBR 管理:"
+        echo "1) 查看 BBR 状态"
+        echo "2) 启用 BBR"
+        read -rp "选择 [1-2]: " b
+        case "$b" in
+          1) show_bbr_status ;;
+          2) enable_bbr_only ;;
+          *) echo "无效选项" ;;
+        esac
+        ;;
       0) echo "已退出"; exit 0 ;;
       *) echo "编号无效，请重试" ;;
     esac
@@ -408,6 +431,7 @@ usage() {
   bash ssrust.sh logs                 # 查看日志
   bash ssrust.sh status               # 查看状态
   bash ssrust.sh test                 # 简单网络测试
+  bash ssrust.sh bbr                  # 仅启用/检查 BBR
   bash ssrust.sh delete-config        # 删除配置并停服务
 EOF
 }
@@ -423,6 +447,7 @@ case "$ACTION" in
   logs) show_logs ;;
   status) status_check ;;
   test) network_test ;;
+  bbr) enable_bbr_only ;;
   delete-config) delete_config ;;
   -h|--help|help) usage ;;
   *)
