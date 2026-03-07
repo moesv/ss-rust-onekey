@@ -7,7 +7,7 @@
 - 自动安装 shadowsocks-rust（最新 release）
 - 默认协议：`aes-128-gcm`
 - 密码自动随机生成（32 位）
-- 默认随机 5 位端口（避开已占用端口）
+- 默认随机高位端口（30000-65535，避开已占用端口）
 - 自动写入并启用 `systemd` 服务
 - 自动写入 `sysctl`（含 BBR 参数）
 - 若系统已启用 BBR，则跳过重复写入
@@ -23,13 +23,13 @@ chmod +x ssrust.sh
 
 ## 可选环境变量
 
-- `SS_PORT`（默认自动随机 5 位端口，且避开已占用端口）
+- `SS_PORT`（默认自动随机高位端口 30000-65535，且避开已占用端口）
 - `SS_METHOD`（默认 `aes-128-gcm`）
 
 示例：
 
 ```bash
-SS_PORT=443 SS_METHOD=aes-128-gcm ./ssrust.sh
+SS_PORT=34567 SS_METHOD=aes-128-gcm ./ssrust.sh
 ```
 
 ## 安装后检查
@@ -60,8 +60,8 @@ bash ssrust.sh
 # 改端口（自动随机5位端口）
 bash ssrust.sh change-port
 
-# 改为指定端口
-SS_PORT=23456 bash ssrust.sh change-port
+# 改为指定高位端口
+SS_PORT=34567 bash ssrust.sh change-port
 
 # 删除配置并停服务
 bash ssrust.sh delete-config
@@ -79,6 +79,6 @@ bash ssrust.sh
 
 ## 本次优化
 
-- 增加端口格式校验（仅允许 10000-65535 五位端口）
+- 增加端口格式校验（仅允许 30000-65535 五位高位端口）
 - 菜单顶部显示脚本版本号
-- 查看配置默认脱敏显示（可用 `show-config-plain` 查看明文）
+- 配置查看支持菜单直读

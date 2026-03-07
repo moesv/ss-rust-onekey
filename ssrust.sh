@@ -2,14 +2,12 @@
 set -euo pipefail
 
 # ===== 可改参数 =====
-# 默认自动随机 5 位端口（10000-65535），也可手动传 SS_PORT
+# 默认自动随机高位端口（30000-65535），也可手动传 SS_PORT
 SS_PORT="${SS_PORT:-}"
 SS_METHOD="${SS_METHOD:-aes-128-gcm}"
-# 配置查看是否默认脱敏（1=脱敏，0=明文）
-MASK_CONFIG_DEFAULT="${MASK_CONFIG_DEFAULT:-1}"
 # ===================
 
-SCRIPT_VERSION="v1.4.0"
+SCRIPT_VERSION="v1.5.0"
 
 CONFIG_PATH="/etc/shadowsocks-rust/config.json"
 SERVICE_PATH="/etc/systemd/system/shadowsocks-rust.service"
@@ -28,7 +26,7 @@ port_in_use() {
 pick_free_port() {
   local p tries=0
   while (( tries < 200 )); do
-    p=$((10000 + RANDOM % 55536))
+    p=$((30000 + RANDOM % 35536))
     if ! port_in_use "$p"; then
       echo "$p"
       return 0
@@ -41,14 +39,14 @@ pick_free_port() {
 validate_port() {
   local p="$1"
   [[ "$p" =~ ^[0-9]{5}$ ]] || return 1
-  (( p >= 10000 && p <= 65535 )) || return 1
+  (( p >= 30000 && p <= 65535 )) || return 1
   return 0
 }
 
 resolve_port() {
   if [[ -n "$SS_PORT" ]]; then
     if ! validate_port "$SS_PORT"; then
-      echo "端口格式错误：$SS_PORT（必须是 10000-65535 的 5 位端口）"
+      echo "端口格式错误：$SS_PORT（必须是 30000-65535 的 5 位高位端口）"
       exit 1
     fi
     if port_in_use "$SS_PORT"; then
@@ -348,49 +346,13 @@ show_logs() {
   journalctl -u shadowsocks-rust -n 100 --no-pager
 }
 
-mask_value() {
-  local v="$1"
-  local n=${#v}
-  if (( n <= 8 )); then
-    echo "****"
-  else
-    echo "${v:0:4}****${v:n-4:4}"
-  fi
-}
-
 show_config() {
-  local mode="${1:-auto}"
-  local mask="$MASK_CONFIG_DEFAULT"
-  [[ "$mode" == "plain" ]] && mask=0
-  [[ "$mode" == "mask" ]] && mask=1
-
   if [[ -f "$INFO_PATH" ]]; then
-    local server port method password ss_url
-    server="$(grep '^server=' "$INFO_PATH" | cut -d= -f2-)"
-    port="$(grep '^port=' "$INFO_PATH" | cut -d= -f2-)"
-    method="$(grep '^method=' "$INFO_PATH" | cut -d= -f2-)"
-    password="$(grep '^password=' "$INFO_PATH" | cut -d= -f2-)"
-    ss_url="$(grep '^ss_url=' "$INFO_PATH" | cut -d= -f2-)"
-
     echo "当前配置："
-    echo "server=${server}"
-    echo "port=${port}"
-    echo "method=${method}"
-    if [[ "$mask" == "1" ]]; then
-      echo "password=$(mask_value "$password")"
-      echo "ss_url=$(mask_value "$ss_url")"
-      echo "(当前为脱敏显示，命令行用: bash ssrust.sh show-config-plain 查看明文)"
-    else
-      echo "password=${password}"
-      echo "ss_url=${ss_url}"
-    fi
+    cat "$INFO_PATH"
   elif [[ -f "$CONFIG_PATH" ]]; then
     echo "当前配置（原始）："
-    if [[ "$mask" == "1" ]]; then
-      jq '.password="****"' "$CONFIG_PATH"
-    else
-      cat "$CONFIG_PATH"
-    fi
+    cat "$CONFIG_PATH"
   else
     echo "未找到配置文件"
   fi
@@ -461,7 +423,7 @@ EOF
       1) do_install ;;
       2) show_config ;;
       3)
-        read -rp "输入新端口(10000-65535，回车则随机): " p
+        read -rp "输入新端口(30000-65535，回车则随机高位端口): " p
         SS_PORT="$p"
         change_port
         ;;
@@ -495,7 +457,7 @@ usage() {
   bash ssrust.sh                      # 交互菜单
   bash ssrust.sh install              # 安装/重装
   bash ssrust.sh change-port          # 改端口（随机5位）
-  SS_PORT=23456 bash ssrust.sh change-port   # 改为指定端口
+  SS_PORT=34567 bash ssrust.sh change-port   # 改为指定高位端口
   bash ssrust.sh change-password      # 重置随机密码
   bash ssrust.sh restart              # 重启服务
   bash ssrust.sh stop                 # 停止服务
@@ -503,8 +465,7 @@ usage() {
   bash ssrust.sh status               # 查看状态
   bash ssrust.sh test                 # 简单网络测试
   bash ssrust.sh bbr                  # 仅启用/检查 BBR
-  bash ssrust.sh show-config          # 查看当前配置（默认脱敏）
-  bash ssrust.sh show-config-plain    # 查看当前配置（明文）
+  bash ssrust.sh show-config          # 查看当前配置
   bash ssrust.sh delete-config        # 删除配置并停服务
 EOF
 }
@@ -521,8 +482,7 @@ case "$ACTION" in
   status) status_check ;;
   test) network_test ;;
   bbr) enable_bbr_only ;;
-  show-config) show_config mask ;;
-  show-config-plain) show_config plain ;;
+  show-config) show_config ;;
   delete-config) delete_config ;;
   -h|--help|help) usage ;;
   *)
