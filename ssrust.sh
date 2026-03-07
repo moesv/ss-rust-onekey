@@ -284,21 +284,144 @@ delete_config() {
   echo "✅ 已删除配置并停止服务"
 }
 
+change_password() {
+  if [[ ! -f "$CONFIG_PATH" ]]; then
+    echo "未找到配置文件：$CONFIG_PATH，请先执行安装"
+    exit 1
+  fi
+  local new_password method port server_ip
+  new_password="$(gen_password)"
+  method="$(jq -r '.method' "$CONFIG_PATH")"
+  port="$(jq -r '.server_port' "$CONFIG_PATH")"
+
+  cp -a "$CONFIG_PATH" "${CONFIG_PATH}.bak.$(date +%Y%m%d-%H%M%S)"
+  jq --arg pw "$new_password" '.password=$pw' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp"
+  mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
+  chmod 600 "$CONFIG_PATH"
+
+  systemctl restart shadowsocks-rust
+  health_check
+
+  server_ip="$(get_server_ip)"
+  write_info "$server_ip" "$method" "$new_password" "$port"
+  echo "密码已重置（随机生成）"
+}
+
+restart_service() {
+  systemctl restart shadowsocks-rust
+  health_check
+  echo "✅ 服务已重启"
+}
+
+stop_service() {
+  systemctl stop shadowsocks-rust
+  echo "✅ 服务已停止"
+}
+
+show_logs() {
+  journalctl -u shadowsocks-rust -n 100 --no-pager
+}
+
+status_check() {
+  local port
+  port="$(jq -r '.server_port' "$CONFIG_PATH" 2>/dev/null || echo 0)"
+  systemctl status shadowsocks-rust --no-pager || true
+  echo "---"
+  ss -lntup | grep -E "ssserver|:${port}\\b" || true
+  [[ -f "$INFO_PATH" ]] && { echo "---"; cat "$INFO_PATH"; }
+}
+
+network_test() {
+  local port
+  if [[ -f "$CONFIG_PATH" ]]; then
+    port="$(jq -r '.server_port' "$CONFIG_PATH")"
+    echo "本机端口测试:"
+    ss -lntup | grep -E ":${port}\b|ssserver" || true
+  else
+    echo "未找到配置文件，无法测试端口"
+  fi
+}
+
+config_manage_menu() {
+  while true; do
+    cat <<EOF
+
+转发配置管理:
+1. 更改端口（随机5位）
+2. 更改端口（手动输入）
+3. 重置密码（随机）
+0. 返回上级
+EOF
+    read -rp "请输入选项 [0-3]: " c
+    case "$c" in
+      1) SS_PORT=""; change_port ;;
+      2) read -rp "输入新端口(10000-65535): " p; SS_PORT="$p"; change_port ;;
+      3) change_password ;;
+      0) break ;;
+      *) echo "无效选项" ;;
+    esac
+  done
+}
+
+interactive_menu() {
+  while true; do
+    cat <<EOF
+
+请选择操作:
+1. 安装(更新)程序/脚本
+2. 转发配置管理
+3. 重启服务
+4. 停止服务
+5. 查看日志
+6. 端口/服务状态
+7. 网络链路测试
+8. 删除配置
+0. 退出
+EOF
+    read -rp "请输入选择 [0-8]: " n
+    case "$n" in
+      1) do_install ;;
+      2) config_manage_menu ;;
+      3) restart_service ;;
+      4) stop_service ;;
+      5) show_logs ;;
+      6) status_check ;;
+      7) network_test ;;
+      8) delete_config ;;
+      0) exit 0 ;;
+      *) echo "无效选项" ;;
+    esac
+  done
+}
+
 usage() {
   cat <<EOF
 用法:
-  bash ssrust.sh                # 安装/重装（默认）
-  bash ssrust.sh install        # 安装/重装
-  bash ssrust.sh change-port    # 改端口（随机5位）
+  bash ssrust.sh                      # 交互菜单
+  bash ssrust.sh install              # 安装/重装
+  bash ssrust.sh change-port          # 改端口（随机5位）
   SS_PORT=23456 bash ssrust.sh change-port   # 改为指定端口
-  bash ssrust.sh delete-config  # 删除配置并停服务
+  bash ssrust.sh change-password      # 重置随机密码
+  bash ssrust.sh restart              # 重启服务
+  bash ssrust.sh stop                 # 停止服务
+  bash ssrust.sh logs                 # 查看日志
+  bash ssrust.sh status               # 查看状态
+  bash ssrust.sh test                 # 简单网络测试
+  bash ssrust.sh delete-config        # 删除配置并停服务
 EOF
 }
 
-ACTION="${1:-install}"
+ACTION="${1:-menu}"
 case "$ACTION" in
+  menu) interactive_menu ;;
   install) do_install ;;
   change-port) change_port ;;
+  change-password) change_password ;;
+  restart) restart_service ;;
+  stop) stop_service ;;
+  logs) show_logs ;;
+  status) status_check ;;
+  test) network_test ;;
   delete-config) delete_config ;;
   -h|--help|help) usage ;;
   *)

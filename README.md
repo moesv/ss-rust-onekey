@@ -66,3 +66,12 @@ SS_PORT=23456 bash ssrust.sh change-port
 # 删除配置并停服务
 bash ssrust.sh delete-config
 ```
+
+
+## 交互菜单
+
+```bash
+bash ssrust.sh
+```
+
+可用选项：安装/更新、转发配置管理（改端口/重置密码）、重启/停止服务、查看日志、状态检测、删除配置。
