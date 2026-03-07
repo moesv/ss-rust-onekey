@@ -5,7 +5,11 @@ set -euo pipefail
 # 默认自动随机 5 位端口（10000-65535），也可手动传 SS_PORT
 SS_PORT="${SS_PORT:-}"
 SS_METHOD="${SS_METHOD:-aes-128-gcm}"
+# 配置查看是否默认脱敏（1=脱敏，0=明文）
+MASK_CONFIG_DEFAULT="${MASK_CONFIG_DEFAULT:-1}"
 # ===================
+
+SCRIPT_VERSION="v1.4.0"
 
 CONFIG_PATH="/etc/shadowsocks-rust/config.json"
 SERVICE_PATH="/etc/systemd/system/shadowsocks-rust.service"
@@ -34,8 +38,19 @@ pick_free_port() {
   return 1
 }
 
+validate_port() {
+  local p="$1"
+  [[ "$p" =~ ^[0-9]{5}$ ]] || return 1
+  (( p >= 10000 && p <= 65535 )) || return 1
+  return 0
+}
+
 resolve_port() {
   if [[ -n "$SS_PORT" ]]; then
+    if ! validate_port "$SS_PORT"; then
+      echo "端口格式错误：$SS_PORT（必须是 10000-65535 的 5 位端口）"
+      exit 1
+    fi
     if port_in_use "$SS_PORT"; then
       echo "端口已被占用: $SS_PORT，请换一个端口"
       exit 1
@@ -333,13 +348,49 @@ show_logs() {
   journalctl -u shadowsocks-rust -n 100 --no-pager
 }
 
+mask_value() {
+  local v="$1"
+  local n=${#v}
+  if (( n <= 8 )); then
+    echo "****"
+  else
+    echo "${v:0:4}****${v:n-4:4}"
+  fi
+}
+
 show_config() {
+  local mode="${1:-auto}"
+  local mask="$MASK_CONFIG_DEFAULT"
+  [[ "$mode" == "plain" ]] && mask=0
+  [[ "$mode" == "mask" ]] && mask=1
+
   if [[ -f "$INFO_PATH" ]]; then
+    local server port method password ss_url
+    server="$(grep '^server=' "$INFO_PATH" | cut -d= -f2-)"
+    port="$(grep '^port=' "$INFO_PATH" | cut -d= -f2-)"
+    method="$(grep '^method=' "$INFO_PATH" | cut -d= -f2-)"
+    password="$(grep '^password=' "$INFO_PATH" | cut -d= -f2-)"
+    ss_url="$(grep '^ss_url=' "$INFO_PATH" | cut -d= -f2-)"
+
     echo "当前配置："
-    cat "$INFO_PATH"
+    echo "server=${server}"
+    echo "port=${port}"
+    echo "method=${method}"
+    if [[ "$mask" == "1" ]]; then
+      echo "password=$(mask_value "$password")"
+      echo "ss_url=$(mask_value "$ss_url")"
+      echo "(当前为脱敏显示，命令行用: bash ssrust.sh show-config-plain 查看明文)"
+    else
+      echo "password=${password}"
+      echo "ss_url=${ss_url}"
+    fi
   elif [[ -f "$CONFIG_PATH" ]]; then
     echo "当前配置（原始）："
-    cat "$CONFIG_PATH"
+    if [[ "$mask" == "1" ]]; then
+      jq '.password="****"' "$CONFIG_PATH"
+    else
+      cat "$CONFIG_PATH"
+    fi
   else
     echo "未找到配置文件"
   fi
@@ -390,7 +441,7 @@ interactive_menu() {
   while true; do
     cat <<EOF
 
-================= SSRust 控制台 =================
+============= SSRust 控制台 ${SCRIPT_VERSION} =============
  1) 安装
  2) 查看配置
  3) 修改端口
@@ -452,7 +503,8 @@ usage() {
   bash ssrust.sh status               # 查看状态
   bash ssrust.sh test                 # 简单网络测试
   bash ssrust.sh bbr                  # 仅启用/检查 BBR
-  bash ssrust.sh show-config          # 查看当前配置
+  bash ssrust.sh show-config          # 查看当前配置（默认脱敏）
+  bash ssrust.sh show-config-plain    # 查看当前配置（明文）
   bash ssrust.sh delete-config        # 删除配置并停服务
 EOF
 }
@@ -469,7 +521,8 @@ case "$ACTION" in
   status) status_check ;;
   test) network_test ;;
   bbr) enable_bbr_only ;;
-  show-config) show_config ;;
+  show-config) show_config mask ;;
+  show-config-plain) show_config plain ;;
   delete-config) delete_config ;;
   -h|--help|help) usage ;;
   *)
