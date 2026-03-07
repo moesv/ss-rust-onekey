@@ -333,6 +333,18 @@ show_logs() {
   journalctl -u shadowsocks-rust -n 100 --no-pager
 }
 
+show_config() {
+  if [[ -f "$INFO_PATH" ]]; then
+    echo "当前配置："
+    cat "$INFO_PATH"
+  elif [[ -f "$CONFIG_PATH" ]]; then
+    echo "当前配置（原始）："
+    cat "$CONFIG_PATH"
+  else
+    echo "未找到配置文件"
+  fi
+}
+
 status_check() {
   local port
   port="$(jq -r '.server_port' "$CONFIG_PATH" 2>/dev/null || echo 0)"
@@ -388,10 +400,11 @@ interactive_menu() {
  7) 连接链路自检
  8) 清除当前配置（危险）
  9) BBR 管理（查看/启用）
+10) 查看当前配置
  0) 退出控制台
 ==================================================
 EOF
-    read -rp "输入编号 [0-9]: " n
+    read -rp "输入编号 [0-10]: " n
     case "$n" in
       1) do_install ;;
       2) config_manage_menu ;;
@@ -412,6 +425,7 @@ EOF
           *) echo "无效选项" ;;
         esac
         ;;
+      10) show_config ;;
       0) echo "已退出"; exit 0 ;;
       *) echo "编号无效，请重试" ;;
     esac
@@ -432,6 +446,7 @@ usage() {
   bash ssrust.sh status               # 查看状态
   bash ssrust.sh test                 # 简单网络测试
   bash ssrust.sh bbr                  # 仅启用/检查 BBR
+  bash ssrust.sh show-config          # 查看当前配置
   bash ssrust.sh delete-config        # 删除配置并停服务
 EOF
 }
@@ -448,6 +463,7 @@ case "$ACTION" in
   status) status_check ;;
   test) network_test ;;
   bbr) enable_bbr_only ;;
+  show-config) show_config ;;
   delete-config) delete_config ;;
   -h|--help|help) usage ;;
   *)
