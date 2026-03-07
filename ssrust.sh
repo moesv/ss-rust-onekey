@@ -367,29 +367,30 @@ interactive_menu() {
   while true; do
     cat <<EOF
 
-请选择操作:
-1. 安装(更新)程序/脚本
-2. 转发配置管理
-3. 重启服务
-4. 停止服务
-5. 查看日志
-6. 端口/服务状态
-7. 网络链路测试
-8. 删除配置
-0. 退出
+================= SSRust 控制台 =================
+ 1) 一键安装 / 升级 SSRust
+ 2) 节点参数维护（改端口/换密码）
+ 3) 启动或重启服务
+ 4) 停止服务
+ 5) 运行状态体检
+ 6) 查看最近日志（100行）
+ 7) 连接链路自检
+ 8) 清除当前配置（危险）
+ 0) 退出控制台
+==================================================
 EOF
-    read -rp "请输入选择 [0-8]: " n
+    read -rp "输入编号 [0-8]: " n
     case "$n" in
       1) do_install ;;
       2) config_manage_menu ;;
       3) restart_service ;;
       4) stop_service ;;
-      5) show_logs ;;
-      6) status_check ;;
+      5) status_check ;;
+      6) show_logs ;;
       7) network_test ;;
       8) delete_config ;;
-      0) exit 0 ;;
-      *) echo "无效选项" ;;
+      0) echo "已退出"; exit 0 ;;
+      *) echo "编号无效，请重试" ;;
     esac
   done
 }
