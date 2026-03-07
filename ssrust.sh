@@ -76,9 +76,10 @@ get_server_ip() {
 
 write_info() {
   local server_ip="$1" method="$2" password="$3" port="$4"
-  local ss_base64 ss_url
+  local ss_base64 ss_url surge_line
   ss_base64="$(printf '%s' "${method}:${password}@${server_ip}:${port}" | base64 -w0)"
   ss_url="ss://${ss_base64}"
+  surge_line="测试 = ss, ${server_ip}, ${port}, encrypt-method=${method}, password=\"${password}\", udp-relay=true"
 
   cat > "$INFO_PATH" <<EOF
 server=${server_ip}
@@ -86,6 +87,7 @@ port=${port}
 method=${method}
 password=${password}
 ss_url=${ss_url}
+surge=${surge_line}
 EOF
   chmod 600 "$INFO_PATH"
 
@@ -96,6 +98,7 @@ EOF
   echo "method:   ${method}"
   echo "password: ${password}"
   echo "ss_url:   ${ss_url}"
+  echo "surge:    ${surge_line}"
   echo "info:     ${INFO_PATH}"
   echo
 }
@@ -358,6 +361,29 @@ show_config() {
   fi
 }
 
+show_surge_line() {
+  if [[ -f "$INFO_PATH" ]]; then
+    local line
+    line="$(grep '^surge=' "$INFO_PATH" | cut -d= -f2-)"
+    if [[ -n "$line" ]]; then
+      echo "$line"
+      return 0
+    fi
+  fi
+
+  if [[ -f "$CONFIG_PATH" ]]; then
+    local server port method password
+    server="$(get_server_ip)"
+    port="$(jq -r '.server_port' "$CONFIG_PATH")"
+    method="$(jq -r '.method' "$CONFIG_PATH")"
+    password="$(jq -r '.password' "$CONFIG_PATH")"
+    echo "测试 = ss, ${server}, ${port}, encrypt-method=${method}, password=\"${password}\", udp-relay=true"
+  else
+    echo "未找到配置文件"
+    return 1
+  fi
+}
+
 status_check() {
   local port
   port="$(jq -r '.server_port' "$CONFIG_PATH" 2>/dev/null || echo 0)"
@@ -415,10 +441,11 @@ interactive_menu() {
  9) 查看日志
 10) 连通性测试
 11) 卸载
+12) 输出 Surge 节点行
  0) 退出
 ==================================================
 EOF
-    read -rp "输入编号 [0-11]: " n
+    read -rp "输入编号 [0-12]: " n
     case "$n" in
       1) do_install ;;
       2) show_config ;;
@@ -445,6 +472,7 @@ EOF
       9) show_logs ;;
       10) network_test ;;
       11) delete_config ;;
+      12) show_surge_line ;;
       0) echo "已退出"; exit 0 ;;
       *) echo "编号无效，请重试" ;;
     esac
@@ -466,6 +494,7 @@ usage() {
   bash ssrust.sh test                 # 简单网络测试
   bash ssrust.sh bbr                  # 仅启用/检查 BBR
   bash ssrust.sh show-config          # 查看当前配置
+  bash ssrust.sh surge-line           # 输出 Surge 节点行
   bash ssrust.sh delete-config        # 删除配置并停服务
 EOF
 }
@@ -483,6 +512,7 @@ case "$ACTION" in
   test) network_test ;;
   bbr) enable_bbr_only ;;
   show-config) show_config ;;
+  surge-line) show_surge_line ;;
   delete-config) delete_config ;;
   -h|--help|help) usage ;;
   *)
