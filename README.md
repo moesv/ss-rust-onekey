@@ -2,6 +2,26 @@
 
 一键安装 / 管理 **Shadowsocks-Rust + Shadow-TLS**（Debian / Ubuntu / CentOS / RHEL）。
 
+## 一键运行
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/moesv/ssrust/main/ssrust.sh)
+```
+
+直接安装（默认 `aes-128-gcm` + 随机高位端口）：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/moesv/ssrust/main/ssrust.sh) install
+```
+
+落到本地 `/usr/local/bin/ssrust` 反复使用：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/moesv/ssrust/main/ssrust.sh -o /usr/local/bin/ssrust
+chmod +x /usr/local/bin/ssrust
+ssrust                # 之后直接敲 ssrust 进菜单
+```
+
 ## 功能
 
 - **Shadowsocks-Rust**：自动安装最新版（GitHub redirect 获取 tag，避开 API 限流），sha256 校验，主源失败自动回退到备份源
